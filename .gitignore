@@ -1,0 +1,24 @@
+# CMake
+build/
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+
+# Compiled binaries
+*.exe
+*.dll
+*.obj
+*.lib
+*.pdb
+
+# IDE
+.vscode/
+
+# Benchmark output
+benchmark_results/
+
+# OS
+.DS_Store
+Thumbs.db
