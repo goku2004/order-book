@@ -105,7 +105,7 @@ To run the latency executable and generate charts in one step (from PowerShell):
 .\tools\run_latency_report.ps1
 ```
 
-The wrapper expects the Release executable at `build\\release\\Release\\order_book_latency.exe`. Install the plotting dependency once if needed:
+The wrapper expects the Release executable at `build\release\Release\order_book_latency.exe`. Install the plotting dependency once if needed:
 
 ```powershell
 py -3 -m pip install matplotlib
@@ -137,13 +137,14 @@ These are deliberately controlled microbenchmarks. They isolate behavior but do 
 
 ### Per-operation latency harness
 
-The standalone latency harness records one `steady_clock` duration per `add_order()` call, then computes summary statistics after sorting the samples. Current workflows include:
+The standalone latency harness records one `steady_clock` duration per `add_order()` call, then computes summary statistics from a sorted copy while preserving the original sample order for trace analysis. Each run also measures a clock-pair baseline; it is reported separately and not subtracted. Current workflows include:
 
 - Resting insertion at one price level.
 - Full matching with one resting order consumed per operation.
 - Partial fills of a larger resting order.
 - Best-ask exhaustion.
-- Multi-level sweeps over 16, 64, and 256 levels.
+- Multi-level sweeps over 16, 64, and 256 adjacent price levels.
+- Sparse best-ask traversal with gaps of 1, 16, 64, and 256 ticks.
 
 The timer surrounds the public `add_order()` call. Incoming order construction is outside the timed region; creation of the returned trade vector is part of the API call, while destruction of the returned vector occurs after the stop timestamp. The returned trade count is accumulated into a checksum outside the timed interval. The harness is a first measurement instrument, not a cycle-accurate profiler.
 
@@ -152,7 +153,8 @@ Interpret each workload according to its setup:
 - The full-match workload keeps a next ask available to avoid exhausting the sell side on every sample.
 - The partial-fill workload keeps a large resting ask present.
 - The exhaustion workload repeatedly prepares an ask outside timing and measures consuming it. It is intended to expose best-ask update/traversal behavior, but setup is not timed.
-- Sweep setup is excluded from timing. Each incoming order crosses a controlled number of consecutive occupied price levels.
+- Sweep setup is excluded from timing. The next resting ask is adjacent to the swept levels, so the sweep does not accidentally include a long empty-price scan.
+- Sparse traversal keeps a sentinel ask at a controlled tick gap. Each timed order consumes a single best ask and measures the best-price update across the intervening empty levels.
 
 ### Initial latency observations (user-reported local run)
 
