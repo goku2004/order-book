@@ -17,7 +17,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ------------------------------------------------------------
 
 add_library(matching_engine
-    src/order.cpp
+    src/order_book.cpp
 )
 
 target_include_directories(matching_engine
@@ -62,6 +62,7 @@ if(BUILD_TESTS)
 
     add_executable(order_tests
         tests/order_tests.cpp
+        tests/order_book_tests.cpp
     )
 
     target_link_libraries(order_tests
@@ -95,9 +96,27 @@ if(BUILD_BENCHMARKS)
 
     add_executable(order_benchmark
         benchmarks/order_benchmark.cpp
+        
+    )
+    add_executable(order_book_benchmark
+        benchmarks/order_book_benchmark.cpp
+    )
+
+    add_executable(order_book_latency
+        benchmarks/order_book_latency.cpp
     )
 
     target_link_libraries(order_benchmark
+        PRIVATE
+            matching_engine
+            benchmark::benchmark
+    )
+    target_link_libraries(order_book_benchmark
+        PRIVATE
+            matching_engine
+            benchmark::benchmark
+    )
+    target_link_libraries(order_book_latency
         PRIVATE
             matching_engine
             benchmark::benchmark

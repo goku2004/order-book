@@ -1,0 +1,13 @@
+2026-10-18T17:55:56+05:30
+Running C:\Users\shahv\OneDrive\Documents\matching-engine\build\release\Release\order_book_benchmark.exe
+Run on (16 X 1996 MHz CPU s)
+CPU Caches:
+  L1 Data 32 KiB (x8)
+  L1 Instruction 32 KiB (x8)
+  L2 Unified 512 KiB (x8)
+  L3 Unified 16384 KiB (x1)
+name,iterations,real_time,cpu_time,time_unit,bytes_per_second,items_per_second,label,error_occurred,error_message
+"BM_SingleLevelMatch_mean",5,35318.1,30725.4,ns,,,,,
+"BM_SingleLevelMatch_median",5,34457.4,30361,ns,,,,,
+"BM_SingleLevelMatch_stddev",5,3773.84,3504.04,ns,,,,,
+"BM_SingleLevelMatch_cv",5,0.106853,0.114044,,,,,,
