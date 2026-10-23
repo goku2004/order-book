@@ -18,7 +18,7 @@ The project deliberately starts with a readable, testable baseline. The near-ter
 | Matching design | Dense integer price ladder; FIFO queue per price level; optional best bid/ask |
 | Trade output | `add_order(Order)` returns a vector of trade records |
 | Unit tests | GoogleTest tests for resting orders, crossing trades, resting-price execution, FIFO, partial fills, multi-level matches, best-price updates/reinitialization, price bounds, and zero quantity |
-| Throughput benchmark | Google Benchmark workloads for construction/lifecycle, non-crossing insertions, full matches in both directions, partial fills in both directions, multi-level sweeps, sparse traversal, and a controlled mixed sequence |
+| Throughput benchmark | Google Benchmark workloads for construction/lifecycle, non-crossing insertions, full matches in both directions, partial fills in both directions, multi-level sweeps, sparse traversal, and a controlled mixed sequence; plotting utility added |
 | Latency harness | Custom standalone executable; each run writes timestamped Markdown/CSV output, raw samples, environment metadata, and timer-pair baseline statistics |
 | Concurrency / lock-free | Not implemented; intentionally deferred |
 | Cancellation / order-ID index | Not implemented |
@@ -81,11 +81,19 @@ cmake --build --preset release
 
 The presets currently name the generator `Visual Studio 18 2026`, target x64, and enable tests and benchmarks. Adjust the preset only if that generator is unavailable in the local toolchain.
 
-Run the throughput benchmark executable in Release mode:
+Run the throughput benchmark executable in Release mode and save its CSV output:
 
 ```powershell
 .\build\release\Release\order_book_benchmark.exe --benchmark_repetitions=5 --benchmark_report_aggregates_only=true --benchmark_out=throughput.csv --benchmark_out_format=csv
 ```
+
+Create throughput overview and batch-scaling charts from the resulting Google Benchmark CSV:
+
+```powershell
+py -3 tools/plot_throughput.py throughput.csv
+```
+
+The script writes a Markdown report and plots into a new timestamped subdirectory under `benchmark_results/`. The overview compares available mean items-per-second metrics, while the scaling graph compares selected workloads as batch size changes; do not use cross-workload throughput as a universal ranking when the work counted by each benchmark differs.
 
 Run the standalone latency executable:
 
@@ -184,7 +192,7 @@ Caveats:
 2. Record the exact CPU model and clock/power state alongside the automatically captured environment metadata; these host-specific details are not currently queried automatically.
 3. Interpret the measured clock-pair baseline, but do not mechanically subtract it from every sample.
 4. Use the raw sample traces and empirical CDF to investigate spikes and compare tail behavior.
-5. Add a workload-scaling chart for throughput batches, and profile queue/storage allocation and best-price traversal before selecting an optimization.
+5. Use the throughput batch-scaling chart alongside the latency traces; then profile queue/storage allocation and best-price traversal before selecting an optimization.
 
 ### Next: profile the existing data path
 
