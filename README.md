@@ -19,7 +19,7 @@ The project deliberately starts with a readable, testable baseline. The near-ter
 | Trade output | `add_order(Order)` returns a vector of trade records |
 | Unit tests | GoogleTest tests for resting orders, crossing trades, resting-price execution, FIFO, partial fills, multi-level matches, best-price updates/reinitialization, price bounds, and zero quantity |
 | Throughput benchmark | Google Benchmark workloads for construction/lifecycle, non-crossing insertions, full matches in both directions, partial fills in both directions, multi-level sweeps, sparse traversal, and a controlled mixed sequence |
-| Latency harness | Custom standalone executable recording individual `add_order()` call durations and reporting median, p95, p99, p99.9, and maximum |
+| Latency harness | Custom standalone executable; each run writes timestamped Markdown/CSV output, raw samples, environment metadata, and timer-pair baseline statistics |
 | Concurrency / lock-free | Not implemented; intentionally deferred |
 | Cancellation / order-ID index | Not implemented |
 | Linux performance profiling / CPU pinning | Not yet established |
@@ -51,10 +51,13 @@ The current implementation uses `std::vector<std::queue<Order>>` for both sides.
 ├── tests/
 │   ├── order_tests.cpp
 │   └── order_book_tests.cpp
-└── benchmarks/
-    ├── order_benchmark.cpp
-    ├── order_book_benchmark.cpp
-    └── order_book_latency.cpp
+├── benchmarks/
+│   ├── order_benchmark.cpp
+│   ├── order_book_benchmark.cpp
+│   └── order_book_latency.cpp
+└── tools/
+    ├── plot_latency.py
+    └── run_latency_report.ps1
 ```
 
 ## Build and test
@@ -90,13 +93,31 @@ Run the standalone latency executable:
 .\build\release\Release\order_book_latency.exe
 ```
 
-The latency executable has a custom `main()`; Google Benchmark's `--benchmark_*` flags and CSV reporter do **not** apply to it. At present, its summary is printed to standard output. Redirect output to a text file when desired:
+The latency executable has a custom `main()`; Google Benchmark's `--benchmark_*` flags and CSV reporter do **not** apply to it. Each execution automatically creates a new timestamped directory under `benchmark_results/` with:
+
+- `summary.md` and `summary.csv`: per-workflow min, median, mean, population standard deviation, p95, p99, p99.9, maximum, sample count, and result checksum.
+- `samples.csv`: individual latency samples in measurement order, which allows time-series analysis.
+- `metadata.txt`: compiler, platform, build-mode hint, clock details, hardware-concurrency hint, and measurement-method notes.
+
+To run the latency executable and generate charts in one step (from PowerShell):
 
 ```powershell
-.\build\release\Release\order_book_latency.exe > latency.txt
+.\tools\run_latency_report.ps1
 ```
 
-CSV output and plots are the next benchmark-harness improvements; do not pass Google Benchmark flags to the standalone latency program expecting them to create a file.
+The wrapper expects the Release executable at `build\\release\\Release\\order_book_latency.exe`. Install the plotting dependency once if needed:
+
+```powershell
+py -3 -m pip install matplotlib
+```
+
+To generate plots for the latest report manually:
+
+```powershell
+py -3 tools/plot_latency.py
+```
+
+Or pass a specific report directory to analyze an earlier run. The plotting script writes a percentile comparison chart, an empirical CDF, and a latency trace for each workflow into that report directory. Do not pass Google Benchmark flags to the standalone latency program expecting them to create a file.
 
 ## Benchmarking approach
 
@@ -148,7 +169,7 @@ These numbers were reported from one local Release-mode run and are illustrative
 | 256-level sweep | 5,400 ns | 12,800 ns | 12,800 ns |
 
 Caveats:
-- The 256-level case has only 500 samples, so its nearest-rank p99.9 coincides with its maximum. Collect more samples before using it to assess tail latency.
+- The historical 256-level observation shown above came from a run with only 500 samples, so its nearest-rank p99.9 coincided with its maximum. The report-producing harness now collects 2,000 samples for that workflow; rerun it to obtain a newer baseline rather than treating this historical row as current.
 - A maximum far above p99.9 indicates a rare extreme sample, but does not identify the cause. OS scheduling, interrupts, page faults, allocator effects, timer behavior, and real code-path variation are all possibilities; profiling and repeated runs are needed.
 - A median displayed as 100 ns is constrained by clock measurement granularity and overhead. It should not be interpreted as a cycle-accurate measurement.
 - These results do not establish that one implementation is faster than another. A future optimization must be compared using the same compiler/build, machine, workload, and measurement method.
@@ -157,11 +178,11 @@ Caveats:
 
 ### Near-term: make measurements reproducible
 
-1. Add persistent CSV output to the custom latency harness, ideally one summary row per workflow plus optional raw sample output.
-2. Record run metadata: build configuration, compiler, OS, CPU, sample counts, and workload parameters.
-3. Re-run workloads and compare repeatability; add timer-overhead/granularity checks.
-4. Add more samples to large-sweep tail measurements and keep sample count explicit in every report.
-5. Generate graphs from raw data or summary CSV (latency percentile comparison and workload scaling are initial useful plots).
+1. Re-run the report-producing harness several times and compare variability across runs.
+2. Record the exact CPU model and clock/power state alongside the automatically captured environment metadata; these host-specific details are not currently queried automatically.
+3. Interpret the measured clock-pair baseline, but do not mechanically subtract it from every sample.
+4. Use the raw sample traces and empirical CDF to investigate spikes and compare tail behavior.
+5. Add a workload-scaling chart for throughput batches, and profile queue/storage allocation and best-price traversal before selecting an optimization.
 
 ### Next: profile the existing data path
 
