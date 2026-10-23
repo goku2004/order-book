@@ -96,8 +96,8 @@ if(BUILD_BENCHMARKS)
 
     add_executable(order_benchmark
         benchmarks/order_benchmark.cpp
-        
     )
+
     add_executable(order_book_benchmark
         benchmarks/order_book_benchmark.cpp
     )
@@ -111,15 +111,17 @@ if(BUILD_BENCHMARKS)
             matching_engine
             benchmark::benchmark
     )
+
     target_link_libraries(order_book_benchmark
         PRIVATE
             matching_engine
             benchmark::benchmark
     )
+
+    # The custom latency harness does not use the Google Benchmark API.
     target_link_libraries(order_book_latency
         PRIVATE
             matching_engine
-            benchmark::benchmark
     )
 
 endif()
