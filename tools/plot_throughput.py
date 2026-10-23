@@ -150,7 +150,7 @@ def plot_batch_scaling(
 
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlabel("Operations per timed batch (log scale)")
+    ax.set_xlabel("Benchmark argument (log scale)")
     ax.set_ylabel("Items processed per second (log scale)")
     ax.set_title("Throughput scaling with batch size")
     ax.grid(which="both", alpha=0.25)
