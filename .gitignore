@@ -22,3 +22,7 @@ benchmark_results/
 # OS
 .DS_Store
 Thumbs.db
+# Local benchmark exports
+throughput.csv
+latency.csv
+latency.txt
