@@ -520,7 +520,7 @@ void run_multilevel_sweep(
     uint32_t levels,
     LatencyReport& report)
 {
-    if (levels == 0 || 500 + levels >= 900) {
+    if (levels == 0 || 500 + levels >= 1024) {
         throw std::invalid_argument("Invalid sweep level count");
     }
 
@@ -529,7 +529,8 @@ void run_multilevel_sweep(
     uint64_t checksum = 0;
     uint64_t next_id = 1;
 
-    auto sentinel = make_order(next_id++, 900, 1, Side::Sell);
+    // Keep the next ask adjacent so this workload isolates occupied-level sweeps.
+    auto sentinel = make_order(next_id++, 500 + levels, 1, Side::Sell);
     run_unmeasured([&] { return book.add_order(sentinel); }, checksum);
 
     auto prepare_levels = [&] {
@@ -560,6 +561,50 @@ void run_multilevel_sweep(
     print_stats(label, samples, stats, checksum, report);
 }
 
+// Inserts one ask at price 100, then consumes it. A resting sentinel at
+// 100 + gap makes best_ask maintenance scan a controlled number of empty ticks.
+void run_sparse_gap_traversal(
+    std::size_t warmup_count,
+    std::size_t sample_count,
+    uint32_t gap,
+    LatencyReport& report)
+{
+    if (gap == 0 || 100 + gap >= 1024) {
+        throw std::invalid_argument("Invalid sparse traversal gap");
+    }
+
+    OrderBook book(1024);
+    std::vector<uint64_t> samples(sample_count);
+    uint64_t checksum = 0;
+    uint64_t next_id = 1;
+
+    auto sentinel = make_order(next_id++, 100 + gap, 1, Side::Sell);
+    run_unmeasured([&] { return book.add_order(sentinel); }, checksum);
+
+    auto prepare_best_ask = [&] {
+        auto ask = make_order(next_id++, 100, 1, Side::Sell);
+        run_unmeasured([&] { return book.add_order(ask); }, checksum);
+    };
+
+    uint64_t incoming_id = 1'000'000;
+    for (std::size_t i = 0; i < warmup_count; ++i) {
+        prepare_best_ask();
+        auto buy = make_order(incoming_id++, 100, 1, Side::Buy);
+        run_unmeasured([&] { return book.add_order(buy); }, checksum);
+    }
+
+    for (std::size_t i = 0; i < sample_count; ++i) {
+        prepare_best_ask(); // Excluded: only consuming the best ask is timed.
+        auto buy = make_order(incoming_id++, 100, 1, Side::Buy);
+        samples[i] = time_one_call([&] { return book.add_order(buy); }, checksum);
+    }
+
+    const auto stats = calculate_stats(samples);
+    const std::string label =
+        "Sparse traversal (gap " + std::to_string(gap) + " ticks)";
+    print_stats(label, samples, stats, checksum, report);
+}
+
 } // namespace
 
 int main()
@@ -577,6 +622,12 @@ int main()
         run_multilevel_sweep(1'000, 10'000, 16, report);
         run_multilevel_sweep(500, 2'000, 64, report);
         run_multilevel_sweep(100, 2'000, 256, report);
+
+        // Hold the number of resting orders constant while varying empty ticks.
+        run_sparse_gap_traversal(2'000, 20'000, 1, report);
+        run_sparse_gap_traversal(2'000, 20'000, 16, report);
+        run_sparse_gap_traversal(2'000, 20'000, 64, report);
+        run_sparse_gap_traversal(2'000, 20'000, 256, report);
 
         report.finish();
         std::cout << "\nLatency report saved to: "
