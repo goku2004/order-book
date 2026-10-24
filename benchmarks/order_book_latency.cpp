@@ -582,12 +582,15 @@ void run_sparse_wide_ladder(LatencyReport& report)
     std::vector<int64_t> prices(sample_count + 1);
     std::array<std::vector<uint64_t>, possible_gaps.size()> samples_by_gap;
 
+    for (auto& bucket : samples_by_gap) {
+        bucket.reserve(sample_count / possible_gaps.size() + 16);
+    }
+
     prices[0] = 100;
     for (std::size_t i = 0; i < sample_count; ++i) {
         const auto selected = choose_gap(rng);
         gaps[i] = possible_gaps[selected];
         prices[i + 1] = prices[i] + static_cast<int64_t>(gaps[i]);
-        samples_by_gap[selected].reserve(sample_count / possible_gaps.size() + 16);
     }
 
     // The price ladder spans hundreds of thousands of ticks for this fixed seed.
@@ -640,7 +643,10 @@ void run_sparse_wide_ladder(LatencyReport& report)
         const auto stats = calculate_stats(samples_by_gap[i]);
         const auto label = "Sparse wide ladder (gap " +
             std::to_string(possible_gaps[i]) + " ticks)";
-        print_stats(label, samples_by_gap[i], stats, checksum, report);
+        // One trade is expected for each sample in this bucket.
+        const auto bucket_checksum =
+            static_cast<uint64_t>(samples_by_gap[i].size());
+        print_stats(label, samples_by_gap[i], stats, bucket_checksum, report);
     }
 }
 
