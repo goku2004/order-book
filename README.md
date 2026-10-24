@@ -16,7 +16,7 @@ The project deliberately starts with a readable, testable baseline. The near-ter
 | Order-book API | `include/matching_engine/order_book.hpp` |
 | Implementation | `src/order_book.cpp` |
 | Matching design | Dense integer price ladder; FIFO queue per price level; optional best bid/ask |
-| Trade output | `add_order(Order)` returns a vector of trade records |
+| Trade output | Current API returns `std::vector<Trade>`; this is a measured design choice, not the intended final low-allocation interface |
 | Unit tests | GoogleTest tests for resting orders, crossing trades, resting-price execution, FIFO, partial fills, multi-level matches, best-price updates/reinitialization, price bounds, and zero quantity |
 | Throughput benchmark | Google Benchmark workloads for construction/lifecycle, non-crossing insertions, full matches in both directions, partial fills in both directions, multi-level sweeps, sparse traversal, and a controlled mixed sequence; plotting utility added |
 | Latency harness | Custom standalone executable; each run writes timestamped Markdown/CSV output, raw samples, environment metadata, and timer-pair baseline statistics |
@@ -34,7 +34,7 @@ The project deliberately starts with a readable, testable baseline. The near-ter
 - A trade records buy order ID, sell order ID, execution price, and quantity.
 - Best bid and ask are exposed as optionals, empty when that side has no resting orders.
 
-The current implementation uses `std::vector<std::queue<Order>>` for both sides. This is a useful bounded-price baseline, not a claim that the representation is optimal.
+The current implementation uses `std::vector<std::queue<Order>>` for both sides. This is a useful bounded-price baseline, not a claim that the representation is optimal. The current `add_order()` return value also constructs a per-call trade vector; the next API-design experiment should compare it with streaming per-execution `Trade` events to a caller-owned sink and returning a small order-level summary.
 
 ## Repository layout
 
@@ -153,7 +153,7 @@ The standalone latency harness records one `steady_clock` duration per `add_orde
 - Best-ask exhaustion.
 - Multi-level sweeps over 16, 64, and 256 adjacent price levels.
 - Repeated-gap sparse best-ask traversal with gaps of 1, 16, 64, and 256 ticks.
-- A seeded wide-ladder traversal (seed `0x5EED1234`) that visits distinct occupied levels over a much larger price range with gaps selected from 1, 16, 64, and 128 ticks.
+- A seeded wide-ladder traversal (seed `0x5EED1234`) that visits distinct occupied levels over a much larger price range with gaps selected from 1, 16, 64, and 128 ticks, reporting both overall and per-gap latency.
 
 The timer surrounds the public `add_order()` call. Incoming order construction is outside the timed region; creation of the returned trade vector is part of the API call, while destruction of the returned vector occurs after the stop timestamp. The returned trade count is accumulated into a checksum outside the timed interval. The harness is a first measurement instrument, not a cycle-accurate profiler.
 
@@ -196,11 +196,18 @@ Caveats:
 4. Use the raw sample traces and empirical CDF to investigate spikes and compare tail behavior.
 5. Use the throughput batch-scaling chart alongside the latency traces; then profile queue/storage allocation and best-price traversal before selecting an optimization.
 
-### Next: profile the existing data path
+### Next: improve the public execution-output contract
+
+1. Preserve the current vector-returning API as a baseline until an alternative is measured.
+2. Add a small order-level result (filled quantity, leaves quantity, execution count) and an execution-event sink that receives one `Trade` per fill.
+3. Compare a reusable caller-owned sink/buffer with the current fresh vector on single-fill and multi-level workloads. A single `Trade` cannot represent multiple executions against different resting orders.
+4. Define sink capacity/back-pressure behavior. The engine must never silently drop an execution event; persistence or network I/O should not run synchronously inside the matching hot path.
+
+### Then: profile the existing data path
 
 1. Inspect queue allocation behavior, especially growth in the resting-insertion workload.
-2. Measure how best-price updates scale with the number of empty ticks traversed.
-3. Profile trade-vector creation on matching calls.
+2. Measure how best-price updates scale with the number of empty ticks traversed and compare repeated-gap vs seeded wide-ladder workloads.
+3. Profile trade-vector creation on matching calls and compare it with the event-sink implementation.
 4. Compare dense and sparse occupancy workloads and identify whether traversal, allocation, or execution count dominates.
 5. Make one optimization at a time and rerun all correctness tests and benchmark workloads.
 
