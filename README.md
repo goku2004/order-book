@@ -153,7 +153,7 @@ The standalone latency harness records one `steady_clock` duration per `add_orde
 - Best-ask exhaustion.
 - Multi-level sweeps over 16, 64, and 256 adjacent price levels.
 - Repeated-gap sparse best-ask traversal with gaps of 1, 16, 64, and 256 ticks.
-- A seeded wide-ladder traversal (seed `0x5EED1234`) that visits distinct occupied levels over a much larger price range with randomized gaps.
+- A seeded wide-ladder traversal (seed `0x5EED1234`) that visits distinct occupied levels over a much larger price range with gaps selected from 1, 16, 64, and 128 ticks.
 
 The timer surrounds the public `add_order()` call. Incoming order construction is outside the timed region; creation of the returned trade vector is part of the API call, while destruction of the returned vector occurs after the stop timestamp. The returned trade count is accumulated into a checksum outside the timed interval. The harness is a first measurement instrument, not a cycle-accurate profiler.
 
@@ -164,7 +164,7 @@ Interpret each workload according to its setup:
 - The exhaustion workload repeatedly prepares an ask outside timing and measures consuming it. It is intended to expose best-ask update/traversal behavior, but setup is not timed.
 - Sweep setup is excluded from timing. The next resting ask is adjacent to the swept levels, so the sweep does not accidentally include a long empty-price scan.
 - Repeated-gap sparse traversal keeps a sentinel ask at a controlled tick gap and revisits the same ladder region. It acts as a warm-working-set control.
-- The seeded wide-ladder traversal preloads asks at distinct price levels and consumes them in ascending order with gaps selected from `{1, 16, 64, 128}`. The ladder's working set is much larger than the fixed-gap test and the seed makes the sequence reproducible. This is a wider-working-set test, not a guaranteed cold-cache test: cache state is not explicitly flushed.
+- The seeded wide-ladder traversal preloads asks at distinct price levels and consumes them in ascending order with gaps selected from `{1, 16, 64, 128}`. The ladder's working set is much larger than the fixed-gap test and the seed makes the sequence reproducible. Per-gap rows are also reported. This is a wider-working-set test, not a guaranteed cold-cache test: cache state is not explicitly flushed.
 
 ### Initial latency observations (user-reported local run)
 
