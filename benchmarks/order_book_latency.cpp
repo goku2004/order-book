@@ -1,6 +1,7 @@
 #include "matching_engine/order_book.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -11,6 +12,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <random>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -563,6 +565,85 @@ void run_multilevel_sweep(
 
 // Inserts one ask at price 100, then consumes it. A resting sentinel at
 // 100 + gap makes best_ask maintenance scan a controlled number of empty ticks.
+// Unlike run_sparse_gap_traversal, this walk traverses distinct price levels
+// over a large ladder. Gaps are generated with a fixed seed, so every run uses
+// the same workload. This increases the working set; it does not disable caches.
+void run_sparse_wide_ladder(LatencyReport& report)
+{
+    constexpr std::size_t sample_count = 4'000;
+    constexpr uint32_t seed = 0x5EED1234u;
+    constexpr std::array<uint32_t, 4> possible_gaps{1, 16, 64, 128};
+
+    std::mt19937 rng(seed);
+    std::uniform_int_distribution<std::size_t> choose_gap(
+        0, possible_gaps.size() - 1);
+
+    std::vector<uint32_t> gaps(sample_count);
+    std::vector<int64_t> prices(sample_count + 1);
+    std::array<std::vector<uint64_t>, possible_gaps.size()> samples_by_gap;
+
+    prices[0] = 100;
+    for (std::size_t i = 0; i < sample_count; ++i) {
+        const auto selected = choose_gap(rng);
+        gaps[i] = possible_gaps[selected];
+        prices[i + 1] = prices[i] + static_cast<int64_t>(gaps[i]);
+        samples_by_gap[selected].reserve(sample_count / possible_gaps.size() + 16);
+    }
+
+    // The price ladder spans hundreds of thousands of ticks for this fixed seed.
+    // Its two price-level vectors are intentionally larger than a small cache.
+    OrderBook book(prices.back());
+    std::vector<uint64_t> samples(sample_count);
+    uint64_t checksum = 0;
+    uint64_t order_id = 1;
+
+    // Load one one-unit ask at each generated price. The final ask is the
+    // sentinel for the last measured operation.
+    for (const auto price : prices) {
+        auto ask = make_order(order_id++, price, 1, Side::Sell);
+        run_unmeasured([&] { return book.add_order(ask); }, checksum);
+    }
+
+    const uint64_t first_incoming_id = 1'000'000;
+    for (std::size_t i = 0; i < sample_count; ++i) {
+        auto buy = make_order(
+            first_incoming_id + i, prices[i], 1, Side::Buy);
+
+        // Every operation consumes one best ask. The next best ask is located
+        // gaps[i] ticks away, so best-price recomputation scans the empty ticks.
+        samples[i] = time_one_call(
+            [&] { return book.add_order(buy); }, checksum);
+
+        const auto bucket = std::find(
+            possible_gaps.begin(), possible_gaps.end(), gaps[i]);
+        const auto bucket_index = static_cast<std::size_t>(
+            std::distance(possible_gaps.begin(), bucket));
+        samples_by_gap[bucket_index].push_back(samples[i]);
+    }
+
+    const auto overall_stats = calculate_stats(samples);
+    print_stats(
+        "Sparse traversal (wide ladder, seed 0x5EED1234)",
+        samples,
+        overall_stats,
+        checksum,
+        report);
+
+    // These per-gap summaries help separate the effect of gap size from the
+    // broad working-set effect. Each bucket has fewer observations than the
+    // overall run, so its extreme percentiles should be treated cautiously.
+    for (std::size_t i = 0; i < possible_gaps.size(); ++i) {
+        if (samples_by_gap[i].empty()) {
+            continue;
+        }
+
+        const auto stats = calculate_stats(samples_by_gap[i]);
+        const auto label = "Sparse wide ladder (gap " +
+            std::to_string(possible_gaps[i]) + " ticks)";
+        print_stats(label, samples_by_gap[i], stats, checksum, report);
+    }
+}
+
 void run_sparse_gap_traversal(
     std::size_t warmup_count,
     std::size_t sample_count,
@@ -628,6 +709,10 @@ int main()
         run_sparse_gap_traversal(2'000, 20'000, 16, report);
         run_sparse_gap_traversal(2'000, 20'000, 64, report);
         run_sparse_gap_traversal(2'000, 20'000, 256, report);
+
+        // One pass through a seeded, larger price ladder. This is a distinct
+        // working-set experiment, not a hardware cache-flush benchmark.
+        run_sparse_wide_ladder(report);
 
         report.finish();
         std::cout << "\nLatency report saved to: "
