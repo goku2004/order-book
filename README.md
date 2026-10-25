@@ -90,13 +90,13 @@ Run the throughput benchmark executable in Release mode and save its CSV output:
 .\build\release\Release\order_book_benchmark.exe --benchmark_repetitions=5 --benchmark_report_aggregates_only=true --benchmark_out=throughput.csv --benchmark_out_format=csv
 ```
 
-Create throughput overview and batch-scaling charts from the resulting Google Benchmark CSV:
+Create throughput overview, batch-scaling, and seeded-profile category-rate charts from the resulting Google Benchmark CSV:
 
 ```powershell
 py -3 tools/plot_throughput.py throughput.csv
 ```
 
-The script writes a Markdown report and plots into a new timestamped subdirectory under `benchmark_results/`. The overview compares available mean items-per-second metrics, while the scaling graph compares selected workloads as batch size changes; do not use cross-workload throughput as a universal ranking when the work counted by each benchmark differs.
+The script writes a Markdown report and plots into a new timestamped subdirectory under `benchmark_results/`. The overview compares available mean items-per-second metrics, the scaling graph compares selected workloads as batch size changes, and `seeded_profile_category_rates.png` compares the 4,000-operation profiles' category operation rates. Category rates are contributions to overall replay throughput, not isolated per-operation latencies. Do not use cross-workload throughput as a universal ranking when the work counted by each benchmark differs.
 
 Run the standalone latency executable:
 
