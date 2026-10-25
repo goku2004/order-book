@@ -99,14 +99,11 @@ def display_benchmark_name(name: str) -> str:
         profile_id = int(seeded.group(3))
         profile_names = {
             0: "Balanced 45/25/20/10",
-            1: "Insertion-heavy 60/25/10/5",
-            2: "Matching-heavy 25/40/25/10",
+            1: "Insert-heavy 60/25/10/5",
+            2: "Match-heavy 25/40/25/10",
         }
         profile = profile_names.get(profile_id, f"Unknown profile {profile_id}")
-        return (
-            f"Seeded replay | {profile} | {operation_count:,} ops "
-            f"| seed 0x{seed:X}"
-        )
+        return f"{profile} | {operation_count:,} ops | seed 0x{seed:X}"
 
     return name.replace("BM_", "").replace("_", " ")
 
