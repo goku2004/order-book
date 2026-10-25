@@ -302,8 +302,6 @@ def main() -> int:
             "types; it should not be interpreted as a fair ranking when workloads "
             "have different amounts of work per operation.\n\n"
         )
-        handle.write("| Benchmark case | Items / second | Mean real time (ns) | Mean CPU time (ns) |\n")
-        handle.write("|---|---:|---:|---:|\n")
         handle.write(
             "| Benchmark case | Items / second | Mean real time (ns) | "
             "Mean CPU time (ns) | Trade events / second | Trades / API call |\n"
