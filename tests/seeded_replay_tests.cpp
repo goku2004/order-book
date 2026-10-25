@@ -101,6 +101,32 @@ TEST(SeededReplayTest, EachProfileMaintainsWorkloadInvariants)
     }
 }
 
+TEST(SeededReplayTest, AdditionalBalancedSeedsMaintainWorkloadInvariants)
+{
+    constexpr std::array<uint32_t, 3> seeds{
+        0xC0FFEEu,
+        0x12345678u,
+        0xDEADBEEFu
+    };
+
+    for (const auto seed : seeds) {
+        const auto workload = seeded_replay::make_workload(
+            4'000, seed, seeded_replay::WorkloadProfile::Balanced);
+
+        OrderBook primary{seeded_replay::kPrimaryBookMaxPrice};
+        OrderBook sparse{workload.sparse_book_max_price};
+        seeded_replay::seed_order_books(primary, sparse, workload);
+
+        const auto metrics = seeded_replay::run_workload(
+            primary, sparse, workload);
+
+        EXPECT_EQ(metrics.trade_count_mismatches, 0u) << "seed=" << seed;
+        EXPECT_EQ(metrics.passive_insert_crossings, 0u) << "seed=" << seed;
+        EXPECT_EQ(metrics.total_executed_quantity, metrics.total_trade_events)
+            << "seed=" << seed;
+    }
+}
+
 TEST(SeededReplayTest, SameSeedProducesSameOperations)
 {
     const auto first = seeded_replay::make_workload(4'000, 0xC0FFEEu);
