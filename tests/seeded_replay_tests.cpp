@@ -31,6 +31,11 @@ TEST(SeededReplayTest, RejectsInvalidOperationCounts)
         seeded_replay::make_workload(
             seeded_replay::kMaxOperationCount + 20, 1),
         std::invalid_argument);
+    EXPECT_THROW(
+        seeded_replay::make_workload(
+            4'000, 1,
+            static_cast<seeded_replay::WorkloadProfile>(99)),
+        std::invalid_argument);
 }
 
 TEST(SeededReplayTest, PreservesExactOperationDistribution)
@@ -58,6 +63,10 @@ TEST(SeededReplayTest, AllProfilesHaveExactRequestedPercentages)
         operation_count, 0x5EEDu, seeded_replay::WorkloadProfile::InsertionHeavy);
     const auto matching_workload = seeded_replay::make_workload(
         operation_count, 0x5EEDu, seeded_replay::WorkloadProfile::MatchingHeavy);
+
+    EXPECT_EQ(balanced_workload.profile, seeded_replay::WorkloadProfile::Balanced);
+    EXPECT_EQ(insertion_workload.profile, seeded_replay::WorkloadProfile::InsertionHeavy);
+    EXPECT_EQ(matching_workload.profile, seeded_replay::WorkloadProfile::MatchingHeavy);
 
     EXPECT_EQ(count_categories(balanced_workload), balanced);
     EXPECT_EQ(count_categories(insertion_workload), insertion_heavy);
