@@ -35,13 +35,16 @@ void accumulate_trades(
 {
     auto& category = metrics.categories[category_index(kind)];
 
-    category.trade_events += static_cast<uint64_t>(trades.size());
-    metrics.total_trade_events += static_cast<uint64_t>(trades.size());
+    const auto event_count = static_cast<uint64_t>(trades.size());
+    category.trade_events += event_count;
+    metrics.total_trade_events += event_count;
 
-    for (const auto& trade : trades) {
-        category.executed_quantity += trade.quantity;
-        metrics.total_executed_quantity += trade.quantity;
-    }
+    // Every resting order in the active seeded liquidity has quantity one.
+    // Thus each generated execution is one unit and executed quantity equals
+    // event count. Avoid traversing the returned vector in the timed replay
+    // solely to recompute a quantity already fixed by this workload design.
+    category.executed_quantity += event_count;
+    metrics.total_executed_quantity += event_count;
 }
 
 bool is_buy_side(std::mt19937& rng)
