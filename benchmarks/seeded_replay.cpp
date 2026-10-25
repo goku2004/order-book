@@ -8,6 +8,11 @@
 #include <utility>
 
 namespace seeded_replay {
+
+// The header exposes the type in the matching_engine namespace. Make it
+// available to the out-of-class replay helper definitions below.
+using matching_engine::OrderBook;
+
 namespace {
 
 using matching_engine::Order;
