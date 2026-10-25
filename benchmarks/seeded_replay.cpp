@@ -9,10 +9,6 @@
 
 namespace seeded_replay {
 
-// The header exposes the type in the matching_engine namespace. Make it
-// available to the out-of-class replay helper definitions below.
-using matching_engine::OrderBook;
-
 namespace {
 
 using matching_engine::Order;
@@ -174,8 +170,8 @@ Workload make_workload(std::size_t operation_count, uint32_t seed)
 }
 
 void seed_order_books(
-    OrderBook& primary,
-    OrderBook& sparse,
+    matching_engine::OrderBook& primary,
+    matching_engine::OrderBook& sparse,
     const Workload& workload)
 {
     if (workload.operations.empty() ||
@@ -229,8 +225,8 @@ void seed_order_books(
 }
 
 ReplayMetrics run_workload(
-    OrderBook& primary,
-    OrderBook& sparse,
+    matching_engine::OrderBook& primary,
+    matching_engine::OrderBook& sparse,
     const Workload& workload)
 {
     ReplayMetrics metrics{};
