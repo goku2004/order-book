@@ -17,8 +17,8 @@ The project deliberately starts with a readable, testable baseline. The near-ter
 | Implementation | `src/order_book.cpp` |
 | Matching design | Dense integer price ladder; FIFO queue per price level; optional best bid/ask |
 | Trade output | Current API returns `std::vector<Trade>`; this is a measured design choice, not the intended final low-allocation interface |
-| Unit tests | GoogleTest tests for resting orders, crossing trades, resting-price execution, FIFO, partial fills, multi-level matches, best-price updates/reinitialization, price bounds, and zero quantity |
-| Throughput benchmark | Google Benchmark workloads for construction/lifecycle, non-crossing insertions, full matches in both directions, partial fills in both directions, multi-level sweeps, sparse traversal, and a controlled mixed sequence; plotting utility added |
+| Unit tests | GoogleTest covers matching semantics and seeded replay ratios, determinism, and workload invariants |
+| Throughput benchmark | Google Benchmark microbenchmarks plus a seeded 45/25/20/10 mixed replay; throughput plotting utility added |
 | Latency harness | Custom standalone executable; each run writes timestamped Markdown/CSV output, raw samples, environment metadata, and timer-pair baseline statistics |
 | Concurrency / lock-free | Not implemented; intentionally deferred |
 | Cancellation / order-ID index | Not implemented |
@@ -131,17 +131,42 @@ Or pass a specific report directory to analyze an earlier run. The plotting scri
 
 ### Throughput microbenchmarks
 
-The Google Benchmark executable times batches of calls with setup outside the measured interval in most operation benchmarks. Current cases include:
+The Google Benchmark executable measures controlled operation batches and includes a separate seeded replay workload. Existing microbenchmarks cover:
 
 - Non-crossing BUY and SELL insertions.
 - Full matching against asks and bids.
 - Partial fills against a resting order.
 - Book construction/destruction at different price bounds.
-- A controlled multi-level matching workload.
-- Sparse price-level traversal with varying tick gaps.
-- A synthetic mixed sequence containing two inserts and two matches per cycle.
+- Multi-level matching, sparse traversal, and a synthetic mixed sequence.
 
-These are deliberately controlled microbenchmarks. They isolate behavior but do not represent a calibrated replay of real market data. The mixed sequence is synthetic and should not be described as a realistic market workload.
+These microbenchmarks isolate behavior. They are not a calibrated replay of real market data.
+
+#### Seeded mixed replay
+
+The reusable generator lives in `benchmarks/seeded_replay.hpp/.cpp`; `BM_SeededMixedReplay` is registered in the existing `order_book_benchmark` executable, so no second benchmark entry point is needed. The generator creates its operation sequence before timing and uses a fixed seed.
+
+The category proportions are exact for operation counts divisible by 20:
+
+| Category | Share | Behavior |
+|---|---:|---|
+| Passive limit insertion | 45% | Adds non-crossing orders at prices away from the active top of book |
+| Top-of-book matching | 25% | Matches the live best opposing order; half of these operations request a partial fill |
+| Multi-level sweep | 20% | Crosses a bounded number of unit-sized resting orders and may scan empty price ticks as the book evolves |
+| Sparse-level traversal | 10% | Consumes one ask from a separate sparse book, whose seeded gaps exercise best-ask recalculation |
+
+The current registered replay cases use 4,000 operations with seed `0x5EED`, 8,000 operations with the same seed, and 4,000 operations with seed `0xC0FFEE`. The seed fixes the generated operation order and parameters for a given standard-library/toolchain implementation; C++ does not guarantee identical `std::shuffle` or distribution mappings across all standard libraries.
+
+For each Google Benchmark iteration, dense and sparse books are rebuilt and seeded while timing is paused. The timed region executes the operation stream against the existing `add_order(Order)` API. This makes the benchmark a repeatable synthetic replay, not a measurement of startup or book-seeding time. It currently measures the vector-returning API and its result-vector lifecycle; it does not yet represent the future execution-sink API.
+
+The benchmark reports incoming API calls/s, trade events/s, executed quantity/s, per-category operation rates, trade-count mismatches, passive insertion crossings, and trade events per API call. The seeded active liquidity has unit quantity, so the replay's executed-quantity count currently equals its trade-event count. The expected diagnostic values are **zero** for `trade_count_mismatches_per_replay` and `passive_insert_crossings_per_replay`; do not treat a run with nonzero diagnostics as a valid performance baseline.
+
+Run only the seeded replay and save its results:
+
+```powershell
+.\build\release\Release\order_book_benchmark.exe --benchmark_filter=BM_SeededMixedReplay --benchmark_repetitions=5 --benchmark_report_aggregates_only=true --benchmark_out=seeded_replay.csv --benchmark_out_format=csv
+```
+
+This workload is closer to an end-to-end stateful test than isolated microbenchmarks, but it is still synthetic. The passive price bands, unit-sized active liquidity, separate sparse book, and fixed operation categories are test-fixture assumptions—not claims about actual exchange order-flow distributions.
 
 ### Per-operation latency harness
 
