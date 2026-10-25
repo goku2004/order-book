@@ -129,7 +129,7 @@ Workload make_workload(
             .kind = OperationKind::SingleLevelMatch,
             .side = is_buy_side(rng) ? Side::Buy : Side::Sell,
             .price = 0, // Derived from the current best price during replay.
-            .quantity = (i < top_match_count / 2) ? 2u : 1u,
+            .quantity = (i < single_match_count / 2) ? 2u : 1u,
             .level_count = 1,
             .gap = 1
         });
@@ -271,7 +271,7 @@ ReplayMetrics run_workload(
                 return primary.add_order(order);
             }
 
-            case OperationKind::TopOfBookMatch: {
+            case OperationKind::SingleLevelMatch: {
                 const auto best = operation.side == Side::Buy
                     ? primary.best_ask()
                     : primary.best_bid();
@@ -343,7 +343,7 @@ ReplayMetrics run_workload(
                 ++metrics.passive_insert_crossings;
             }
             break;
-        case OperationKind::TopOfBookMatch:
+        case OperationKind::SingleLevelMatch:
         case OperationKind::SparseLevel:
             if (trades.size() != 1) {
                 ++metrics.trade_count_mismatches;
