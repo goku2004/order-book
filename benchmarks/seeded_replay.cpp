@@ -55,7 +55,10 @@ bool is_buy_side(std::mt19937& rng)
 
 } // namespace
 
-Workload make_workload(std::size_t operation_count, uint32_t seed)
+Workload make_workload(
+    std::size_t operation_count,
+    uint32_t seed,
+    WorkloadProfile profile)
 {
     if (operation_count == 0 ||
         operation_count > kMaxOperationCount ||
@@ -65,18 +68,35 @@ Workload make_workload(std::size_t operation_count, uint32_t seed)
             "and no greater than 8000");
     }
 
+    // Weights are integer fifths of 20: this keeps every profile's proportions
+    // exact for any supported operation count divisible by 20.
+    std::array<std::size_t, kCategoryCount> weights{};
+    switch (profile) {
+    case WorkloadProfile::Balanced:
+        weights = {9, 5, 4, 2}; // 45 / 25 / 20 / 10
+        break;
+    case WorkloadProfile::InsertionHeavy:
+        weights = {12, 5, 2, 1}; // 60 / 25 / 10 / 5
+        break;
+    case WorkloadProfile::MatchingHeavy:
+        weights = {5, 8, 5, 2}; // 25 / 40 / 25 / 10
+        break;
+    default:
+        throw std::invalid_argument("Unknown seeded replay workload profile");
+    }
+
     Workload workload;
     workload.seed = seed;
+    workload.profile = profile;
     workload.operations.reserve(operation_count);
 
     std::mt19937 rng(seed);
     const std::size_t units = operation_count / 20;
 
-    // Exact proportions: 9/20 = 45%, 5/20 = 25%, 4/20 = 20%, 2/20 = 10%.
-    const std::size_t passive_count = 9 * units;
-    const std::size_t top_match_count = 5 * units;
-    const std::size_t sweep_count = 4 * units;
-    const std::size_t sparse_count = 2 * units;
+    const std::size_t passive_count = weights[category_index(OperationKind::PassiveInsert)] * units;
+    const std::size_t single_match_count = weights[category_index(OperationKind::SingleLevelMatch)] * units;
+    const std::size_t sweep_count = weights[category_index(OperationKind::MultiLevelSweep)] * units;
+    const std::size_t sparse_count = weights[category_index(OperationKind::SparseLevel)] * units;
 
     std::uniform_int_distribution<uint32_t> passive_quantity(1, 5);
     std::uniform_int_distribution<int64_t> passive_bid_price(1'000, 3'000);
@@ -101,12 +121,12 @@ Workload make_workload(std::size_t operation_count, uint32_t seed)
         });
     }
 
-    // Half of the top-of-book operations submit quantity 1; half submit
+    // Half of the single-level match operations submit quantity 1; half submit
     // quantity 2 against unit resting liquidity. The latter partially fill
     // the incoming order, leaving one unit to rest at its limit price.
-    for (std::size_t i = 0; i < top_match_count; ++i) {
+    for (std::size_t i = 0; i < single_match_count; ++i) {
         workload.operations.push_back(OperationSpec{
-            .kind = OperationKind::TopOfBookMatch,
+            .kind = OperationKind::SingleLevelMatch,
             .side = is_buy_side(rng) ? Side::Buy : Side::Sell,
             .price = 0, // Derived from the current best price during replay.
             .quantity = (i < top_match_count / 2) ? 2u : 1u,
