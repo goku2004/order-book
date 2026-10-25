@@ -1,4 +1,6 @@
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <benchmark/benchmark.h>
 
 #include "matching_engine/order.hpp"
