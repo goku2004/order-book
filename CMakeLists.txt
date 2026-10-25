@@ -63,6 +63,13 @@ if(BUILD_TESTS)
     add_executable(order_tests
         tests/order_tests.cpp
         tests/order_book_tests.cpp
+        tests/seeded_replay_tests.cpp
+        benchmarks/seeded_replay.cpp
+    )
+
+    target_include_directories(order_tests
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/benchmarks
     )
 
     target_link_libraries(order_tests
