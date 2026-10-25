@@ -1,0 +1,33 @@
+name: Windows build and tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: >
+          cmake -S . -B build/ci
+          -G "Visual Studio 17 2022" -A x64
+          -DBUILD_TESTS=ON
+          -DBUILD_BENCHMARKS=ON
+
+      - name: Build Debug
+        run: cmake --build build/ci --config Debug --parallel 2
+
+      - name: Run unit tests
+        run: ctest --test-dir build/ci -C Debug --output-on-failure
+
+      - name: Build Release
+        run: cmake --build build/ci --config Release --parallel 2
