@@ -52,17 +52,63 @@ def read_google_benchmark_csv(csv_path: Path) -> list[dict[str, object]]:
             continue
 
         mean_name = name[:-len("_mean")]
-        parsed.append({
+        parsed_row: dict[str, object] = {
             "name": mean_name,
             "items_per_second": rate,
             "real_time": float(row["real_time"]),
             "cpu_time": float(row["cpu_time"]),
             "time_unit": row.get("time_unit", ""),
-        })
+        }
+
+        # Preserve custom Google Benchmark counters when present. They are useful
+        # for replay category rates and execution rates, not just API-call rate.
+        optional_numeric_fields = (
+            "trade_events_per_second",
+            "executed_quantity_per_second",
+            "passive_inserts_per_second",
+            "single_level_match_ops_per_second",
+            "sweep_ops_per_second",
+            "sparse_ops_per_second",
+            "trade_events_per_api_call",
+            "workload_profile_id",
+            "workload_seed",
+        )
+        for field in optional_numeric_fields:
+            raw_value = row.get(field, "")
+            if not raw_value:
+                continue
+            try:
+                numeric_value = float(raw_value)
+            except ValueError:
+                continue
+            if math.isfinite(numeric_value):
+                parsed_row[field] = numeric_value
+
+        parsed.append(parsed_row)
 
     if not parsed:
         raise ValueError("No valid mean rows with positive items_per_second found")
     return parsed
+
+
+def display_benchmark_name(name: str) -> str:
+    seeded = re.match(r"BM_SeededMixedReplay/(\d+)/(\d+)/(\d+)", name)
+    if seeded:
+        operation_count = int(seeded.group(1))
+        seed = int(seeded.group(2))
+        profile_id = int(seeded.group(3))
+        profile_names = {
+            0: "Balanced 45/25/20/10",
+            1: "Insertion-heavy 60/25/10/5",
+            2: "Matching-heavy 25/40/25/10",
+        }
+        profile = profile_names.get(profile_id, f"Unknown profile {profile_id}")
+        return (
+            f"Seeded replay | {profile} | {operation_count:,} ops "
+            f"| seed 0x{seed:X}"
+        )
+
+    return name.replace("BM_", "").replace("_", " ")
 
 
 def make_output_dir(csv_path: Path) -> Path:
@@ -82,10 +128,7 @@ def plot_overview(rows: list[dict[str, object]], output_dir: Path) -> Path:
     import matplotlib.pyplot as plt
 
     ordered = sorted(rows, key=lambda row: float(row["items_per_second"]))
-    labels = [
-        str(row["name"]).replace("BM_", "").replace("_", " ")
-        for row in ordered
-    ]
+    labels = [display_benchmark_name(str(row["name"])) for row in ordered]
     values = [float(row["items_per_second"]) for row in ordered]
 
     fig, ax = plt.subplots(figsize=(12, max(7, len(rows) * 0.34)))
@@ -163,6 +206,73 @@ def plot_batch_scaling(
     return path
 
 
+def plot_seeded_profile_rates(
+    rows: list[dict[str, object]],
+    output_dir: Path,
+) -> Path | None:
+    import matplotlib.pyplot as plt
+
+    seeded_rows = []
+    for row in rows:
+        match = re.match(
+            r"BM_SeededMixedReplay/(\d+)/(\d+)/(\d+)",
+            str(row["name"]),
+        )
+        if not match or int(match.group(1)) != 4_000:
+            continue
+        seeded_rows.append(row)
+
+    if not seeded_rows:
+        return None
+
+    # The graph shows each category's contribution to total calls/second under
+    # that workload mix. These are not isolated per-operation service rates.
+    fields = (
+        ("passive_inserts_per_second", "Passive inserts"),
+        ("single_level_match_ops_per_second", "Single-level matches"),
+        ("sweep_ops_per_second", "Multi-level sweeps"),
+        ("sparse_ops_per_second", "Sparse operations"),
+    )
+    if not any(any(field in row for row in seeded_rows) for field, _ in fields):
+        return None
+
+    labels = [display_benchmark_name(str(row["name"])) for row in seeded_rows]
+    x = list(range(len(seeded_rows)))
+    width = 0.8 / len(fields)
+    fig, ax = plt.subplots(figsize=(12, 6.5))
+
+    plotted = False
+    for series_index, (field, label) in enumerate(fields):
+        values = [
+            float(row.get(field, 0.0))
+            for row in seeded_rows
+        ]
+        if not any(value > 0 for value in values):
+            continue
+        offsets = [
+            index - 0.4 + width / 2 + series_index * width
+            for index in x
+        ]
+        ax.bar(offsets, values, width=width, label=label)
+        plotted = True
+
+    if not plotted:
+        plt.close(fig)
+        return None
+
+    ax.set_xticks(x, labels, rotation=22, ha="right")
+    ax.set_ylabel("Category operations per second")
+    ax.set_title("Seeded replay: category rates under different operation mixes")
+    ax.grid(axis="y", alpha=0.25)
+    ax.legend()
+    fig.tight_layout()
+
+    path = output_dir / "seeded_profile_category_rates.png"
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return path
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -181,6 +291,7 @@ def main() -> int:
     output_dir = make_output_dir(csv_path)
     overview = plot_overview(rows, output_dir)
     scaling = plot_batch_scaling(rows, output_dir)
+    profile_rates = plot_seeded_profile_rates(rows, output_dir)
 
     with (output_dir / "summary.md").open("w", encoding="utf-8") as handle:
         handle.write("# Throughput benchmark report\n\n")
@@ -193,22 +304,44 @@ def main() -> int:
         )
         handle.write("| Benchmark case | Items / second | Mean real time (ns) | Mean CPU time (ns) |\n")
         handle.write("|---|---:|---:|---:|\n")
+        handle.write(
+            "| Benchmark case | Items / second | Mean real time (ns) | "
+            "Mean CPU time (ns) | Trade events / second | Trades / API call |\n"
+        )
+        handle.write("|---|---:|---:|---:|---:|---:|\n")
         for row in sorted(rows, key=lambda item: str(item["name"])):
+            trade_rate = row.get("trade_events_per_second")
+            events_per_call = row.get("trade_events_per_api_call")
+            trade_rate_text = (
+                f"{float(trade_rate):.3f}" if trade_rate is not None else "—"
+            )
+            events_per_call_text = (
+                f"{float(events_per_call):.4f}"
+                if events_per_call is not None else "—"
+            )
             handle.write(
-                f"| {row['name']} | {float(row['items_per_second']):.3f} "
+                f"| {display_benchmark_name(str(row['name']))} "
+                f"| {float(row['items_per_second']):.3f} "
                 f"| {float(row['real_time']):.3f} "
-                f"| {float(row['cpu_time']):.3f} |\n"
+                f"| {float(row['cpu_time']):.3f} "
+                f"| {trade_rate_text} | {events_per_call_text} |\n"
             )
         handle.write("\n## Figures\n\n")
         handle.write(f"- {overview.name}: all available benchmark cases.\n")
         if scaling:
             handle.write(f"- {scaling.name}: selected operation workloads as batch size changes.\n")
+        if profile_rates:
+            handle.write(
+                f"- {profile_rates.name}: category rates for 4,000-operation seeded profiles.\n"
+            )
 
     print(f"Loaded {len(rows)} mean benchmark records from: {csv_path}")
     print(f"Analysis report: {output_dir / 'summary.md'}")
     print(f"Plot: {overview}")
     if scaling:
         print(f"Plot: {scaling}")
+    if profile_rates:
+        print(f"Plot: {profile_rates}")
     return 0
 
 
