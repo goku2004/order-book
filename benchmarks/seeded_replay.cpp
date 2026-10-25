@@ -155,7 +155,10 @@ Workload make_workload(std::size_t operation_count, uint32_t seed)
     workload.sparse_ask_sentinel = next_sparse_price;
     workload.sparse_book_max_price = next_sparse_price;
 
-    if (next_sparse_price >= kPrimaryBookMaxPrice) {
+    // At most 10% of operations are sparse and each gap is at most 128 ticks.
+    // Keep this independent of the smaller primary-book price domain.
+    constexpr int64_t kSparseBookMaxPrice = 110'000;
+    if (next_sparse_price > kSparseBookMaxPrice) {
         throw std::length_error("Generated sparse price range exceeds configured bounds");
     }
 
