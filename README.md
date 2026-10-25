@@ -148,20 +148,37 @@ These microbenchmarks isolate behavior. They are not a calibrated replay of real
 
 The reusable generator lives in `benchmarks/seeded_replay.hpp/.cpp`; `BM_SeededMixedReplay` is registered in the existing `order_book_benchmark` executable, so no second benchmark entry point is needed. The generator creates its operation sequence before timing and uses a fixed seed.
 
-The category proportions are exact for operation counts divisible by 20:
+Three exact workload profiles are available. Since every percentage is a multiple of 5%, operation counts must be divisible by 20.
 
-| Category | Share | Behavior |
-|---|---:|---|
-| Passive limit insertion | 45% | Adds non-crossing orders at prices away from the active top of book |
-| Top-of-book matching | 25% | Matches the live best opposing order; half of these operations request a partial fill |
-| Multi-level sweep | 20% | Crosses a bounded number of unit-sized resting orders and may scan empty price ticks as the book evolves |
-| Sparse-level traversal | 10% | Consumes one ask from a separate sparse book, whose seeded gaps exercise best-ask recalculation |
+| Profile | Passive insertion | Single-level match | Multi-level sweep | Sparse-level traversal |
+|---|---:|---:|---:|---:|
+| Balanced | 45% | 25% | 20% | 10% |
+| Insertion-heavy | 60% | 25% | 10% | 5% |
+| Matching-heavy | 25% | 40% | 25% | 10% |
 
-The current registered replay cases use 4,000 operations with seed `0x5EED`, 8,000 operations with the same seed, and 4,000 operations with seed `0xC0FFEE`. The seed fixes the generated operation order and parameters for a given standard-library/toolchain implementation; C++ does not guarantee identical `std::shuffle` or distribution mappings across all standard libraries.
+For 4,000 operations, these translate to:
+
+| Profile | Passive | Single-level | Sweeps | Sparse |
+|---|---:|---:|---:|---:|
+| Balanced | 1,800 | 1,000 | 800 | 400 |
+| Insertion-heavy | 2,400 | 1,000 | 400 | 200 |
+| Matching-heavy | 1,000 | 1,600 | 1,000 | 400 |
+
+The current registered cases compare five scenarios:
+
+| Operations | Profile | Seed | Purpose |
+|---:|---|---|---|
+| 4,000 | Balanced | `0x5EED` | Baseline mix |
+| 4,000 | Balanced | `0xC0FFEE` | Seed/order sensitivity |
+| 4,000 | Insertion-heavy | `0x5EED` | Emphasize resting insertion |
+| 4,000 | Matching-heavy | `0x5EED` | Emphasize match and sweep paths |
+| 8,000 | Balanced | `0x5EED` | Larger replay and book-depth scaling |
+
+For profile comparisons, operation count and seed are held constant in the first, third and fourth cases. The profile changes both the category counts and the generated sequence; the same seed does not mean the different profiles contain the same operations in the same order. The seed fixes the replay generated for a particular profile, size, and standard-library/toolchain. C++ does not guarantee identical `std::shuffle` or distribution mappings across all standard libraries.
 
 For each Google Benchmark iteration, dense and sparse books are rebuilt and seeded while timing is paused. The timed region executes the operation stream against the existing `add_order(Order)` API. This makes the benchmark a repeatable synthetic replay, not a measurement of startup or book-seeding time. It currently measures the vector-returning API and its result-vector lifecycle; it does not yet represent the future execution-sink API.
 
-The benchmark reports incoming API calls/s, trade events/s, executed quantity/s, per-category operation rates, trade-count mismatches, passive insertion crossings, and trade events per API call. The seeded active liquidity has unit quantity, so the replay's executed-quantity count currently equals its trade-event count. The expected diagnostic values are **zero** for `trade_count_mismatches_per_replay` and `passive_insert_crossings_per_replay`; do not treat a run with nonzero diagnostics as a valid performance baseline.
+The benchmark reports incoming API calls/s, trade events/s, executed quantity/s, per-category operation rates, the numeric profile ID and seed, trade-count mismatches, passive insertion crossings, and trade events per API call. The benchmark's single-level match category can generate a trade and leave residual quantity resting; sweep operations generate 4 or 8 executions against unit-sized resting liquidity. The seeded active liquidity has unit quantity, so the replay's executed-quantity count currently equals its trade-event count. The expected diagnostic values are **zero** for `trade_count_mismatches_per_replay` and `passive_insert_crossings_per_replay`; do not treat a run with nonzero diagnostics as a valid performance baseline.
 
 Run only the seeded replay and save its results:
 
