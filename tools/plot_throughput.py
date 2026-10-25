@@ -129,8 +129,12 @@ def plot_overview(rows: list[dict[str, object]], output_dir: Path) -> Path:
     values = [float(row["items_per_second"]) for row in ordered]
 
     fig, ax = plt.subplots(figsize=(12, max(7, len(rows) * 0.34)))
-    ax.barh(range(len(ordered)), values)
-    ax.set_yticks(range(len(ordered)), labels)
+    positions = list(range(len(ordered)))
+    # A dot plot is preferable to bars on a logarithmic axis: bars cannot
+    # have a meaningful zero baseline on a log scale.
+    ax.scatter(values, positions, s=38)
+    ax.set_yticks(positions, labels)
+    ax.set_ylim(-0.5, len(ordered) - 0.5)
     ax.set_xscale("log")
     ax.set_xlabel("Google Benchmark items processed per second (log scale)")
     ax.set_title("Order-book throughput by workload")
