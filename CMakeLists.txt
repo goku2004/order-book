@@ -100,6 +100,7 @@ if(BUILD_BENCHMARKS)
 
     add_executable(order_book_benchmark
         benchmarks/order_book_benchmark.cpp
+        benchmarks/seeded_replay.cpp
     )
 
     add_executable(order_book_latency
