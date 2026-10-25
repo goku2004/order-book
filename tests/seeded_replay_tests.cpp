@@ -40,9 +40,56 @@ TEST(SeededReplayTest, PreservesExactOperationDistribution)
     const auto counts = count_categories(workload);
 
     EXPECT_EQ(counts[seeded_replay::category_index(OperationKind::PassiveInsert)], 1'800);
-    EXPECT_EQ(counts[seeded_replay::category_index(OperationKind::TopOfBookMatch)], 1'000);
+    EXPECT_EQ(counts[seeded_replay::category_index(OperationKind::SingleLevelMatch)], 1'000);
     EXPECT_EQ(counts[seeded_replay::category_index(OperationKind::MultiLevelSweep)], 800);
     EXPECT_EQ(counts[seeded_replay::category_index(OperationKind::SparseLevel)], 400);
+}
+
+TEST(SeededReplayTest, AllProfilesHaveExactRequestedPercentages)
+{
+    constexpr std::size_t operation_count = 4'000;
+    constexpr std::array<std::size_t, 4> balanced{1'800, 1'000, 800, 400};
+    constexpr std::array<std::size_t, 4> insertion_heavy{2'400, 1'000, 400, 200};
+    constexpr std::array<std::size_t, 4> matching_heavy{1'000, 1'600, 1'000, 400};
+
+    const auto balanced_workload = seeded_replay::make_workload(
+        operation_count, 0x5EEDu, seeded_replay::WorkloadProfile::Balanced);
+    const auto insertion_workload = seeded_replay::make_workload(
+        operation_count, 0x5EEDu, seeded_replay::WorkloadProfile::InsertionHeavy);
+    const auto matching_workload = seeded_replay::make_workload(
+        operation_count, 0x5EEDu, seeded_replay::WorkloadProfile::MatchingHeavy);
+
+    EXPECT_EQ(count_categories(balanced_workload), balanced);
+    EXPECT_EQ(count_categories(insertion_workload), insertion_heavy);
+    EXPECT_EQ(count_categories(matching_workload), matching_heavy);
+}
+
+TEST(SeededReplayTest, EachProfileMaintainsWorkloadInvariants)
+{
+    constexpr std::size_t operation_count = 4'000;
+    constexpr std::array profiles{
+        seeded_replay::WorkloadProfile::Balanced,
+        seeded_replay::WorkloadProfile::InsertionHeavy,
+        seeded_replay::WorkloadProfile::MatchingHeavy
+    };
+
+    for (const auto profile : profiles) {
+        const auto workload = seeded_replay::make_workload(
+            operation_count, 0x5EEDu, profile);
+
+        OrderBook primary{seeded_replay::kPrimaryBookMaxPrice};
+        OrderBook sparse{workload.sparse_book_max_price};
+        seeded_replay::seed_order_books(primary, sparse, workload);
+
+        const auto metrics = seeded_replay::run_workload(primary, sparse, workload);
+        EXPECT_EQ(metrics.trade_count_mismatches, 0u);
+        EXPECT_EQ(metrics.passive_insert_crossings, 0u);
+        EXPECT_EQ(metrics.total_executed_quantity, metrics.total_trade_events);
+        EXPECT_EQ(metrics.categories[seeded_replay::category_index(
+            OperationKind::SparseLevel)].trade_events,
+            count_categories(workload)[seeded_replay::category_index(
+                OperationKind::SparseLevel)]);
+    }
 }
 
 TEST(SeededReplayTest, SameSeedProducesSameOperations)
@@ -50,6 +97,7 @@ TEST(SeededReplayTest, SameSeedProducesSameOperations)
     const auto first = seeded_replay::make_workload(4'000, 0xC0FFEEu);
     const auto second = seeded_replay::make_workload(4'000, 0xC0FFEEu);
 
+    EXPECT_EQ(first.profile, second.profile);
     ASSERT_EQ(first.operations.size(), second.operations.size());
     EXPECT_EQ(first.sparse_ask_sentinel, second.sparse_ask_sentinel);
     EXPECT_EQ(first.sparse_book_max_price, second.sparse_book_max_price);
@@ -82,7 +130,7 @@ TEST(SeededReplayTest, LargestConfiguredReplayMaintainsInvariants)
             .operation_count,
         3'600u);
     EXPECT_EQ(
-        metrics.categories[seeded_replay::category_index(OperationKind::TopOfBookMatch)]
+        metrics.categories[seeded_replay::category_index(OperationKind::SingleLevelMatch)]
             .operation_count,
         2'000u);
     EXPECT_EQ(
@@ -112,7 +160,7 @@ TEST(SeededReplayTest, ReplayMaintainsWorkloadAssumptions)
             .operation_count,
         1'800u);
     EXPECT_EQ(
-        metrics.categories[seeded_replay::category_index(OperationKind::TopOfBookMatch)]
+        metrics.categories[seeded_replay::category_index(OperationKind::SingleLevelMatch)]
             .operation_count,
         1'000u);
     EXPECT_EQ(
