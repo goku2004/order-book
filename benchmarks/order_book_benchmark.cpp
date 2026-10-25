@@ -516,7 +516,7 @@ static void BM_SeededMixedReplay(benchmark::State& state)
 
     // Plain metadata counters identify mix and seed in CSV output.
     state.counters["workload_profile_id"] =
-        static_cast<double>(profile);
+        static_cast<double>(static_cast<uint8_t>(profile));
     state.counters["workload_seed"] =
         static_cast<double>(seed);
 }
