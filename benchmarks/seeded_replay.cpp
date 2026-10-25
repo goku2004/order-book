@@ -237,100 +237,102 @@ ReplayMetrics run_workload(
             metrics.categories[category_index(operation.kind)];
         ++category.operation_count;
 
-        std::vector<Trade> trades;
+        // Directly initialize from add_order's return value. This avoids the
+        // extra default construction plus move assignment of a temporary vector.
+        auto trades = [&]() -> std::vector<Trade> {
+            switch (operation.kind) {
+            case OperationKind::PassiveInsert: {
+                auto order = make_order(
+                    primary_incoming_id++,
+                    operation.price,
+                    operation.quantity,
+                    operation.side);
+                return primary.add_order(order);
+            }
 
+            case OperationKind::TopOfBookMatch: {
+                const auto best = operation.side == Side::Buy
+                    ? primary.best_ask()
+                    : primary.best_bid();
+
+                if (!best) {
+                    ++metrics.trade_count_mismatches;
+                    return {};
+                }
+
+                auto order = make_order(
+                    primary_incoming_id++,
+                    *best,
+                    operation.quantity,
+                    operation.side);
+                return primary.add_order(order);
+            }
+
+            case OperationKind::MultiLevelSweep: {
+                const auto best = operation.side == Side::Buy
+                    ? primary.best_ask()
+                    : primary.best_bid();
+
+                if (!best) {
+                    ++metrics.trade_count_mismatches;
+                    return {};
+                }
+
+                // A marketable limit spans the valid price domain. Quantity
+                // caps the sweep at K unit-sized resting orders, allowing an
+                // evolving gap to be scanned without stopping the sweep early.
+                const int64_t limit_price = operation.side == Side::Buy
+                    ? kPrimaryBookMaxPrice
+                    : 0;
+
+                auto order = make_order(
+                    primary_incoming_id++,
+                    limit_price,
+                    operation.level_count,
+                    operation.side);
+                return primary.add_order(order);
+            }
+
+            case OperationKind::SparseLevel: {
+                const auto best = sparse.best_ask();
+
+                if (!best || *best != operation.price) {
+                    ++metrics.trade_count_mismatches;
+                }
+
+                auto order = make_order(
+                    sparse_incoming_id++,
+                    best.value_or(operation.price),
+                    1,
+                    Side::Buy);
+                return sparse.add_order(order);
+            }
+            }
+
+            ++metrics.trade_count_mismatches;
+            return {};
+        }();
+
+        // Validate each workload class using the observed trade count.
+        // The active seeded levels have unit quantity, so each trade event is
+        // also one executed unit in this particular fixture.
         switch (operation.kind) {
-        case OperationKind::PassiveInsert: {
-            auto order = make_order(
-                primary_incoming_id++,
-                operation.price,
-                operation.quantity,
-                operation.side);
-            trades = primary.add_order(order);
-
-            // Passive insert operations are constructed at safe price bands.
+        case OperationKind::PassiveInsert:
             if (!trades.empty()) {
                 ++metrics.passive_insert_crossings;
             }
             break;
-        }
-
-        case OperationKind::TopOfBookMatch: {
-            const auto best = operation.side == Side::Buy
-                ? primary.best_ask()
-                : primary.best_bid();
-
-            if (!best) {
-                ++metrics.trade_count_mismatches;
-                break;
-            }
-
-            auto order = make_order(
-                primary_incoming_id++,
-                *best,
-                operation.quantity,
-                operation.side);
-            trades = primary.add_order(order);
-
-            // This operation is intended to interact with one top-level order.
+        case OperationKind::TopOfBookMatch:
+        case OperationKind::SparseLevel:
             if (trades.size() != 1) {
                 ++metrics.trade_count_mismatches;
             }
             break;
-        }
-
-        case OperationKind::MultiLevelSweep: {
-            const auto best = operation.side == Side::Buy
-                ? primary.best_ask()
-                : primary.best_bid();
-
-            if (!best) {
-                ++metrics.trade_count_mismatches;
-                break;
-            }
-
-            // The limit reaches the far edge of the valid price domain. Quantity
-            // caps the sweep at K units, allowing it to cross empty ticks in the
-            // evolving mixed book but still consume K unit-sized resting orders.
-            const int64_t limit_price = operation.side == Side::Buy
-                ? kPrimaryBookMaxPrice
-                : 0;
-
-            auto order = make_order(
-                primary_incoming_id++,
-                limit_price,
-                operation.level_count,
-                operation.side);
-            trades = primary.add_order(order);
-
-            // In this seeded fixture, the active frontier has sufficient
-            // one-unit orders. A different trade count signals an assumption
-            // worth inspecting, rather than silently changing the workload.
+        case OperationKind::MultiLevelSweep:
             if (trades.size() != operation.level_count) {
                 ++metrics.trade_count_mismatches;
             }
             break;
-        }
-
-        case OperationKind::SparseLevel: {
-            const auto best = sparse.best_ask();
-
-            if (!best || *best != operation.price) {
-                ++metrics.trade_count_mismatches;
-            }
-
-            auto order = make_order(
-                sparse_incoming_id++,
-                best.value_or(operation.price),
-                1,
-                Side::Buy);
-            trades = sparse.add_order(order);
-
-            if (trades.size() != 1) {
-                ++metrics.trade_count_mismatches;
-            }
-            break;
-        }
         }
 
         accumulate_trades(operation.kind, trades, metrics);
@@ -338,5 +340,4 @@ ReplayMetrics run_workload(
 
     return metrics;
 }
-
 } // namespace seeded_replay
