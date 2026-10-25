@@ -64,6 +64,38 @@ TEST(SeededReplayTest, SameSeedProducesSameOperations)
     }
 }
 
+TEST(SeededReplayTest, LargestConfiguredReplayMaintainsInvariants)
+{
+    constexpr std::size_t operation_count = seeded_replay::kMaxOperationCount;
+    const auto workload = seeded_replay::make_workload(operation_count, 0x5EEDu);
+
+    OrderBook primary{seeded_replay::kPrimaryBookMaxPrice};
+    OrderBook sparse{workload.sparse_book_max_price};
+    seeded_replay::seed_order_books(primary, sparse, workload);
+
+    const auto metrics = seeded_replay::run_workload(primary, sparse, workload);
+
+    EXPECT_EQ(metrics.trade_count_mismatches, 0u);
+    EXPECT_EQ(metrics.passive_insert_crossings, 0u);
+    EXPECT_EQ(
+        metrics.categories[seeded_replay::category_index(OperationKind::PassiveInsert)]
+            .operation_count,
+        3'600u);
+    EXPECT_EQ(
+        metrics.categories[seeded_replay::category_index(OperationKind::TopOfBookMatch)]
+            .operation_count,
+        2'000u);
+    EXPECT_EQ(
+        metrics.categories[seeded_replay::category_index(OperationKind::MultiLevelSweep)]
+            .operation_count,
+        1'600u);
+    EXPECT_EQ(
+        metrics.categories[seeded_replay::category_index(OperationKind::SparseLevel)]
+            .trade_events,
+        800u);
+    EXPECT_EQ(metrics.total_executed_quantity, metrics.total_trade_events);
+}
+
 TEST(SeededReplayTest, ReplayMaintainsWorkloadAssumptions)
 {
     constexpr std::size_t operation_count = 4'000;
