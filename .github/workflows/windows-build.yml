@@ -29,5 +29,8 @@ jobs:
       - name: Run unit tests
         run: ctest --test-dir build/ci -C Debug --output-on-failure
 
+      - name: Syntax-check report scripts
+        run: py -3 -m py_compile tools/plot_latency.py tools/plot_throughput.py
+
       - name: Build Release
         run: cmake --build build/ci --config Release --parallel 2
