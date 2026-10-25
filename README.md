@@ -164,12 +164,14 @@ For 4,000 operations, these translate to:
 | Insertion-heavy | 2,400 | 1,000 | 400 | 200 |
 | Matching-heavy | 1,000 | 1,600 | 1,000 | 400 |
 
-The current registered cases compare five scenarios:
+The current registered cases compare seven scenarios:
 
 | Operations | Profile | Seed | Purpose |
 |---:|---|---|---|
 | 4,000 | Balanced | `0x5EED` | Baseline mix |
 | 4,000 | Balanced | `0xC0FFEE` | Seed/order sensitivity |
+| 4,000 | Balanced | `0x12345678` | Additional seed sensitivity |
+| 4,000 | Balanced | `0xDEADBEEF` | Additional seed sensitivity |
 | 4,000 | Insertion-heavy | `0x5EED` | Emphasize resting insertion |
 | 4,000 | Matching-heavy | `0x5EED` | Emphasize match and sweep paths |
 | 8,000 | Balanced | `0x5EED` | Larger replay and book-depth scaling |
