@@ -3,6 +3,7 @@
 
 #include "matching_engine/order.hpp"
 #include "matching_engine/order_book.hpp"
+#include "seeded_replay.hpp"
 
 using matching_engine::Order;
 using matching_engine::OrderBook;
@@ -406,6 +407,110 @@ static void BM_SparseTraversal_BuyAgainstAsks(benchmark::State& state)
 }
 
 
+static void BM_SeededMixedReplay(benchmark::State& state)
+{
+    const auto operation_count =
+        static_cast<std::size_t>(state.range(0));
+    const auto seed =
+        static_cast<std::uint32_t>(state.range(1));
+
+    // Workload generation and all random choices happen before timing.
+    const auto workload =
+        seeded_replay::make_workload(operation_count, seed);
+
+    uint64_t total_trade_events = 0;
+    uint64_t total_executed_quantity = 0;
+    uint64_t total_mismatches = 0;
+    uint64_t total_passive_crossings = 0;
+    std::array<uint64_t, seeded_replay::kCategoryCount> category_ops{};
+
+    for (auto _ : state) {
+        state.PauseTiming();
+
+        seeded_replay::ReplayMetrics metrics{};
+        {
+            // Recreate deterministic initial state for each replay iteration.
+            // Book construction and liquidity seeding are deliberately excluded
+            // from the timed replay, but still contribute to benchmark wall time.
+            OrderBook primary{seeded_replay::kPrimaryBookMaxPrice};
+            OrderBook sparse{workload.sparse_book_max_price};
+
+            seeded_replay::seed_order_books(primary, sparse, workload);
+
+            state.ResumeTiming();
+            metrics = seeded_replay::run_workload(primary, sparse, workload);
+            state.PauseTiming();
+        } // Book destruction is outside the measured region.
+
+        // Aggregate benchmark statistics while timing is paused.
+        total_trade_events += metrics.total_trade_events;
+        total_executed_quantity += metrics.total_executed_quantity;
+        total_mismatches += metrics.trade_count_mismatches;
+        total_passive_crossings += metrics.passive_insert_crossings;
+
+        for (std::size_t i = 0; i < category_ops.size(); ++i) {
+            category_ops[i] += metrics.categories[i].operation_count;
+        }
+
+        // The metrics are consumed after timing; no trade result is discarded.
+        benchmark::DoNotOptimize(metrics.total_trade_events);
+        benchmark::DoNotOptimize(metrics.total_executed_quantity);
+
+        state.ResumeTiming();
+    }
+
+    const auto iterations = static_cast<uint64_t>(state.iterations());
+    const auto total_api_calls = iterations *
+        static_cast<uint64_t>(operation_count);
+
+    state.SetItemsProcessed(static_cast<int64_t>(total_api_calls));
+
+    state.counters["trade_events_per_second"] = benchmark::Counter(
+        static_cast<double>(total_trade_events),
+        benchmark::Counter::kIsRate);
+
+    state.counters["executed_quantity_per_second"] = benchmark::Counter(
+        static_cast<double>(total_executed_quantity),
+        benchmark::Counter::kIsRate);
+
+    state.counters["passive_inserts_per_second"] = benchmark::Counter(
+        static_cast<double>(category_ops[seeded_replay::category_index(
+            seeded_replay::OperationKind::PassiveInsert)]),
+        benchmark::Counter::kIsRate);
+
+    state.counters["top_match_ops_per_second"] = benchmark::Counter(
+        static_cast<double>(category_ops[seeded_replay::category_index(
+            seeded_replay::OperationKind::TopOfBookMatch)]),
+        benchmark::Counter::kIsRate);
+
+    state.counters["sweep_ops_per_second"] = benchmark::Counter(
+        static_cast<double>(category_ops[seeded_replay::category_index(
+            seeded_replay::OperationKind::MultiLevelSweep)]),
+        benchmark::Counter::kIsRate);
+
+    state.counters["sparse_ops_per_second"] = benchmark::Counter(
+        static_cast<double>(category_ops[seeded_replay::category_index(
+            seeded_replay::OperationKind::SparseLevel)]),
+        benchmark::Counter::kIsRate);
+
+    // Average diagnostic counts per replay; nonzero indicates a workload
+    // assumption or matching behavior that needs investigation.
+    state.counters["trade_count_mismatches_per_replay"] =
+        benchmark::Counter(
+            static_cast<double>(total_mismatches) /
+            static_cast<double>(iterations));
+
+    state.counters["passive_insert_crossings_per_replay"] =
+        benchmark::Counter(
+            static_cast<double>(total_passive_crossings) /
+            static_cast<double>(iterations));
+
+    state.counters["trade_events_per_api_call"] =
+        benchmark::Counter(
+            static_cast<double>(total_trade_events) /
+            static_cast<double>(total_api_calls));
+}
+
 static void BM_MixedWorkload(benchmark::State& state)
 {
     const auto batch_size =
@@ -552,5 +657,11 @@ BENCHMARK(BM_MixedWorkload)
     ->Arg(256)
     ->Arg(1024)
     ->Arg(4096);
+
+BENCHMARK(BM_SeededMixedReplay)
+    ->Args({4000, 24301})    // Stable seed 0x5EED.
+    ->Args({8000, 24301})    // Same seed; larger workload.
+    ->Args({4000, 12648430}) // Alternate seed 0xC0FFEE.
+    ->MinTime(0.5);
 
 BENCHMARK_MAIN();
