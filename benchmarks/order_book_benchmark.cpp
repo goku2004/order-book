@@ -670,11 +670,13 @@ BENCHMARK(BM_MixedWorkload)
 
 BENCHMARK(BM_SeededMixedReplay)
     // Balanced: 45% insert, 25% single-level match, 20% sweep, 10% sparse.
-    ->Args({4000, 24301, 0})      // Balanced, seed 0x5EED.
-    ->Args({4000, 12648430, 0})   // Balanced, alternate seed 0xC0FFEE.
+    ->Args({4000, 24301, 0})       // Balanced, seed 0x5EED.
+    ->Args({4000, 12648430, 0})    // Balanced, seed 0xC0FFEE.
+    ->Args({4000, 305419896, 0})   // Balanced, seed 0x12345678.
+    ->Args({4000, 3735928559LL, 0})// Balanced, seed 0xDEADBEEF.
     // Hold size and seed constant while shifting operation mix.
-    ->Args({4000, 24301, 1})      // Insertion-heavy: 60/25/10/5.
-    ->Args({4000, 24301, 2})      // Matching-heavy: 25/40/25/10.
+    ->Args({4000, 24301, 1})       // Insertion-heavy: 60/25/10/5.
+    ->Args({4000, 24301, 2})       // Matching-heavy: 25/40/25/10.
     // Scaling check; book depth changes with operation count in current fixture.
     ->Args({8000, 24301, 0})
     ->MinTime(0.5);
