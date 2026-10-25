@@ -415,10 +415,12 @@ static void BM_SeededMixedReplay(benchmark::State& state)
         static_cast<std::size_t>(state.range(0));
     const auto seed =
         static_cast<std::uint32_t>(state.range(1));
+    const auto profile =
+        static_cast<seeded_replay::WorkloadProfile>(state.range(2));
 
     // Workload generation and all random choices happen before timing.
     const auto workload =
-        seeded_replay::make_workload(operation_count, seed);
+        seeded_replay::make_workload(operation_count, seed, profile);
 
     uint64_t total_trade_events = 0;
     uint64_t total_executed_quantity = 0;
@@ -480,9 +482,9 @@ static void BM_SeededMixedReplay(benchmark::State& state)
             seeded_replay::OperationKind::PassiveInsert)]),
         benchmark::Counter::kIsRate);
 
-    state.counters["top_match_ops_per_second"] = benchmark::Counter(
+    state.counters["single_level_match_ops_per_second"] = benchmark::Counter(
         static_cast<double>(category_ops[seeded_replay::category_index(
-            seeded_replay::OperationKind::TopOfBookMatch)]),
+            seeded_replay::OperationKind::SingleLevelMatch)]),
         benchmark::Counter::kIsRate);
 
     state.counters["sweep_ops_per_second"] = benchmark::Counter(
@@ -511,6 +513,12 @@ static void BM_SeededMixedReplay(benchmark::State& state)
         benchmark::Counter(
             static_cast<double>(total_trade_events) /
             static_cast<double>(total_api_calls));
+
+    // Plain metadata counters identify mix and seed in CSV output.
+    state.counters["workload_profile_id"] =
+        static_cast<double>(profile);
+    state.counters["workload_seed"] =
+        static_cast<double>(seed);
 }
 
 static void BM_MixedWorkload(benchmark::State& state)
@@ -661,9 +669,14 @@ BENCHMARK(BM_MixedWorkload)
     ->Arg(4096);
 
 BENCHMARK(BM_SeededMixedReplay)
-    ->Args({4000, 24301})    // Stable seed 0x5EED.
-    ->Args({8000, 24301})    // Same seed; larger workload.
-    ->Args({4000, 12648430}) // Alternate seed 0xC0FFEE.
+    // Balanced: 45% insert, 25% single-level match, 20% sweep, 10% sparse.
+    ->Args({4000, 24301, 0})      // Balanced, seed 0x5EED.
+    ->Args({4000, 12648430, 0})   // Balanced, alternate seed 0xC0FFEE.
+    // Hold size and seed constant while shifting operation mix.
+    ->Args({4000, 24301, 1})      // Insertion-heavy: 60/25/10/5.
+    ->Args({4000, 24301, 2})      // Matching-heavy: 25/40/25/10.
+    // Scaling check; book depth changes with operation count in current fixture.
+    ->Args({8000, 24301, 0})
     ->MinTime(0.5);
 
 BENCHMARK_MAIN();
