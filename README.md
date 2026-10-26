@@ -58,9 +58,13 @@ The current implementation uses `std::vector<std::queue<Order>>` for both sides.
 │   ├── order_book_latency.cpp
 │   ├── seeded_replay.hpp
 │   └── seeded_replay.cpp
-└── tools/
-    ├── plot_latency.py
-    └── run_latency_report.ps1
+├── tools/
+│   ├── plot_latency.py
+│   ├── plot_throughput.py
+│   └── run_latency_report.ps1
+└── .github/
+    └── workflows/
+        └── windows-build.yml
 ```
 
 ## Build and test
@@ -176,11 +180,44 @@ The current registered cases compare seven scenarios:
 | 4,000 | Matching-heavy | `0x5EED` | Emphasize match and sweep paths |
 | 8,000 | Balanced | `0x5EED` | Larger replay and book-depth scaling |
 
-For profile comparisons, operation count and seed are held constant in the first, third and fourth cases. The profile changes both the category counts and the generated sequence; the same seed does not mean the different profiles contain the same operations in the same order. The seed fixes the replay generated for a particular profile, size, and standard-library/toolchain. C++ does not guarantee identical `std::shuffle` or distribution mappings across all standard libraries.
+Comparison design:
+- **Seed sensitivity:** compare the four 4,000-operation balanced cases (seeds `0x5EED`, `0xC0FFEE`, `0x12345678`, and `0xDEADBEEF`).
+- **Profile sensitivity:** compare the 4,000-operation balanced, insertion-heavy, and matching-heavy cases, all using seed `0x5EED`.
+- **Size/depth sensitivity:** compare the 4,000- and 8,000-operation balanced cases using seed `0x5EED`. This is not a pure stream-length test: the current fixture also doubles its seeded primary-book depth as operation count doubles.
+
+The profile changes both category counts and the generated sequence; the same seed does not make different profiles contain the same operations in the same order. A seed reproduces a workload for a particular size, profile, standard library, and toolchain. C++ does not guarantee identical `std::shuffle` or distribution mappings across all standard libraries.
 
 For each Google Benchmark iteration, dense and sparse books are rebuilt and seeded while timing is paused. The timed region executes the operation stream against the existing `add_order(Order)` API. This makes the benchmark a repeatable synthetic replay, not a measurement of startup or book-seeding time. It currently measures the vector-returning API and its result-vector lifecycle; it does not yet represent the future execution-sink API.
 
 The benchmark reports incoming API calls/s, trade events/s, executed quantity/s, per-category operation rates, the numeric profile ID and seed, trade-count mismatches, passive insertion crossings, and trade events per API call. The benchmark's single-level match category can generate a trade and leave residual quantity resting; sweep operations generate 4 or 8 executions against unit-sized resting liquidity. The seeded active liquidity has unit quantity, so the replay's executed-quantity count currently equals its trade-event count. The expected diagnostic values are **zero** for `trade_count_mismatches_per_replay` and `passive_insert_crossings_per_replay`; do not treat a run with nonzero diagnostics as a valid performance baseline.
+
+#### Latest seeded-replay throughput results
+
+The following mean aggregates are from the latest user-supplied Release-mode report (five Google Benchmark repetitions). Rates are rounded for readability.
+
+| Replay | API calls/s | Trade events/s | Trades/API call |
+|---|---:|---:|---:|
+| Balanced, 4,000 ops, seed `0x5EED` | 3.220M | 5.003M | 1.554 |
+| Balanced, 4,000 ops, seed `0xC0FFEE` | 3.257M | 4.937M | 1.516 |
+| Balanced, 4,000 ops, seed `0x12345678` | 3.109M | 4.809M | 1.547 |
+| Balanced, 4,000 ops, seed `0xDEADBEEF` | 3.088M | 4.730M | 1.532 |
+| Insertion-heavy, 4,000 ops, seed `0x5EED` | 4.729M | 4.294M | 0.908 |
+| Matching-heavy, 4,000 ops, seed `0x5EED` | 2.433M | 4.891M | 2.010 |
+| Balanced, 8,000 ops, seed `0x5EED` | 2.129M | 3.309M | 1.555 |
+
+These are workload-specific results from one machine/run configuration, not general performance guarantees. The uploaded summary contains mean aggregates, not enough per-repetition detail to determine statistical significance of the seed-to-seed differences.
+
+**Interpretation, with limitations:**
+
+- The insertion-heavy profile has the highest API-call rate: about 47% higher than the 4,000-op balanced `0x5EED` case. This is evidence that passive insertion is not the obvious dominant cost in this particular mix. It is not proof that insertion is intrinsically cheap in all book states: the profile also has fewer sweeps, fewer sparse operations, and fewer trade events per call.
+- The matching-heavy profile processes about 24% fewer API calls/s than balanced, while its trade-event rate is only about 2% lower. It generates 2.010 trade events per API call versus 1.554 for balanced. This suggests that matching/output work consumes more time per incoming API call and that API calls/s alone undervalues operations that produce multiple executions.
+- The balanced cases with four seeds range from 3.088M to 3.257M API calls/s, a roughly 5.5% max-to-min range. Without the individual repetition values or confidence intervals, that spread cannot be attributed solely to workload ordering; system noise may contribute.
+- The 8,000-op balanced result is about 34% lower in API-call throughput than the 4,000-op balanced `0x5EED` result. The fixture also doubles the number of preloaded active price levels with operation count, so this is a combined replay-size/book-depth effect, not a clean demonstration that a longer stream alone is slower.
+- Trade events/s stays in a narrower band (about 4.29M–5.00M/s) across the 4,000-op profiles than API calls/s (about 2.43M–4.73M/s). This makes trade output a useful second throughput metric, but it does not isolate the per-trade cost by itself.
+
+**Important plot interpretation:** `seeded_profile_category_rates.png` derives each category's operations/s by dividing that category's operation count by the total measured replay time. Its bars therefore equal the category share multiplied by whole-replay API throughput. They show each category's contribution to the rate, **not** a separately timed per-category speed. Use isolated microbenchmarks to attribute costs.
+
+The top-level evidence points toward prioritizing the combined matching/sweep/trade-output path before optimizing passive insertion. It does not yet identify whether the key cost is the match loop, queue removal, empty-level traversal, or the temporary `std::vector<Trade>`. The next experiments should isolate those components.
 
 Run only the seeded replay and save its results:
 
@@ -250,13 +287,16 @@ Caveats:
 3. Compare a reusable caller-owned sink/buffer with the current fresh vector on single-fill and multi-level workloads. A single `Trade` cannot represent multiple executions against different resting orders.
 4. Define sink capacity/back-pressure behavior. The engine must never silently drop an execution event; persistence or network I/O should not run synchronously inside the matching hot path.
 
-### Then: profile the existing data path
+### Next: choose the optimization using isolated measurements
 
-1. Inspect queue allocation behavior, especially growth in the resting-insertion workload.
-2. Measure how best-price updates scale with the number of empty ticks traversed and compare repeated-gap vs seeded wide-ladder workloads.
-3. Profile trade-vector creation on matching calls and compare it with the event-sink implementation.
-4. Compare dense and sparse occupancy workloads and identify whether traversal, allocation, or execution count dominates.
-5. Make one optimization at a time and rerun all correctness tests and benchmark workloads.
+1. **Matching versus insertion:** use the existing single-level full-match, partial-fill, non-crossing insertion, and multi-level sweep microbenchmarks as the first attribution controls. Keep each workload's book state and amount of work explicit.
+2. **Trade-output cost:** compare the current vector-returning `add_order()` with a future caller-owned preallocated sink/counting sink. Exercise one execution and multi-execution sweeps separately; preserve the vector implementation as the baseline.
+3. **Match-loop scaling:** measure sweep sizes (for example 1, 2, 4, 8, 16, 64 executions) and report both API calls/s and trade events/s. This can reveal whether cost scales mainly with executions or shows additional nonlinear allocation/traversal effects.
+4. **Best-price traversal:** compare repeated-gap and seeded wide-ladder sparse workloads. Do not infer that cache misses occur on every access; the wide-ladder test enlarges the working set but does not flush caches.
+5. **Memory allocation:** use a profiler or allocation instrumentation to determine whether queue/deque storage or the returned trade vector is responsible for meaningful time/allocation counts.
+6. Make one change at a time; rerun correctness tests and the same benchmark seeds, and report per-repetition variability as well as mean results.
+
+The current mixed-replay plots suggest the match/output path is the more productive first target than passive insertion, but category-rate bars are not per-operation timings. Keep that conclusion provisional until the isolated measurements agree.
 
 ### Later: data structures, memory, and concurrency
 
