@@ -12,6 +12,7 @@ The project deliberately starts with a readable, testable baseline. The near-ter
 |---|---|
 | Language / standard | C++20; extensions disabled |
 | Build | CMake 3.25+ with Windows x64 presets |
+| CI | GitHub Actions Windows workflow: Debug build, unit tests, Python plot-script syntax checks, and Release build passed on the current README revision |
 | Order model | `include/matching_engine/order.hpp` |
 | Order-book API | `include/matching_engine/order_book.hpp` |
 | Implementation | `src/order_book.cpp` |
